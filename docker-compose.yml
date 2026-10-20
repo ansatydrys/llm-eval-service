@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-eval}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eval}
+      POSTGRES_DB: ${POSTGRES_DB:-llm_eval}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: .
+    env_file: .env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build: .
+    command: ["python", "-m", "app.worker"]
+    env_file: .env
+    # Lets the current provider call finish on `docker compose stop` (SIGTERM).
+    stop_grace_period: 90s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
